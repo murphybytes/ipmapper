@@ -17,19 +17,16 @@ const (
 	AddressRange = "1.2.0.0/16"
 )
 
-var DataFileLocation string
 var ErrMethodUnsupported = errors.New("HTTP Method is not supported")
 var ErrInvalidPost = errors.New("Expected post body was missing or malformed")
 
-func init() {
-	DataFileLocation = os.Getenv("IPALLOC_DATAPATH")
-	if DataFileLocation == "" {
+func main() {
+	dataFileLocation := os.Getenv("IPALLOC_DATAPATH")
+	if dataFileLocation == "" {
 		panic("IPALLOC_DATAPATH environment variable must be set to path containing app data")
 	}
-}
 
-func main() {
-	dataStore := NewDataStore(DataFileLocation)
+	dataStore := NewDataStore(dataFileLocation)
 
 	mux := http.NewServeMux()
 	mux.Handle("/devices/", http.StripPrefix("/devices/", NewGetHandler(dataStore)))

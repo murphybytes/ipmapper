@@ -99,7 +99,7 @@ func NewDataStore(dataPath string) (ds Storable) {
 	ds = datastore
 
 	signal.Notify(datastore.SignalChannel, os.Interrupt)
-	go datastore.Updater()
+	go datastore.Updater(dataPath)
 
 	return
 }
@@ -119,11 +119,11 @@ func (ds *DataStore) GetDevice(ip string) (deviceName string, e error) {
 	return response.DeviceName, response.Err
 }
 
-func (ds *DataStore) Updater() {
+func (ds *DataStore) Updater(dataLocation string) {
 
 	data := NewData()
 
-	path := filepath.Join(DataFileLocation, "ipmapper.data")
+	path := filepath.Join(dataLocation, "ipmapper.data")
 
 	if _, err := os.Stat(path); err != nil {
 		data.Update(UpdateMessage{IPAddress: "1.2.3.4", Device: "device1"})
