@@ -9,8 +9,7 @@ Operating systems Linux and OSX
 
 ```shell
 tar -xzf ipmapper.tgz
-cd ipmapper
-IPALLOC_DATAPATH=$(pwd) go run data_store.go main.go validations.go
+IPALLOC_DATAPATH=$(pwd) go run main.go data_store.go validations.go
 ```
 
 Note that IPALLOC_DATAPATH references the path where the program will store its data file,
@@ -28,5 +27,5 @@ curl -XGET http://localhost:8080/devices/1.2.3.34
 Assuming source files are located in $GOPATH/src/ipmapper
 
 ```shell
-go test ipmapper 
+go test ipmapper
 ```
