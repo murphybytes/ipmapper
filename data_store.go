@@ -13,15 +13,33 @@ import (
 )
 
 var ErrIPInUse = errors.New("IP Address is in use by another device")
-var ErrDeviceNotFound = errors.New("No device was found for IP address")
+var ErrDeviceNotFound = errors.New("NotFound")
 
 type Storable interface {
-	Close()
+	GetDevice(string) (string, error)
+	UpdateDevice(*UpdateMessage) error
 }
 
-type UpdateMessage struct {
-	IPAddress string `json:"ip"`
-	Device    string `json:"device"`
+type RequestResponse struct {
+	IPAddress       string
+	DeviceName      string
+	Err             error
+	ResponseChannel chan RequestResponse
+}
+
+func NewGetRequestResponse(ip string) *RequestResponse {
+	return &RequestResponse{
+		IPAddress:       ip,
+		ResponseChannel: make(chan RequestResponse),
+	}
+}
+
+func NewPostRequestResponse(ip, device string) *RequestResponse {
+	return &RequestResponse{
+		IPAddress:       ip,
+		DeviceName:      device,
+		ResponseChannel: make(chan RequestResponse),
+	}
 }
 
 type Data struct {
@@ -34,57 +52,6 @@ func NewData() *Data {
 		IPToDevice:  map[string]string{},
 		DeviceToIPs: map[string][]string{},
 	}
-}
-
-type DataStore struct {
-	Data          Data
-	SignalChannel chan os.Signal
-}
-
-func NewDataStore(dataPath string) (ds Storable, e error) {
-
-	dataStore := &DataStore{
-		SignalChannel: make(chan os.Signal, 1),
-		Data: Data{
-			IPToDevice:  map[string]string{},
-			DeviceToIPs: map[string][]string{},
-		},
-	}
-
-	signal.Notify(dataStore.SignalChannel, os.Interrupt)
-	go dataStore.Updater()
-
-	path := filepath.Join(DataFileLocation, "ipmapper")
-
-	if _, err := os.Stat(path); err != nil {
-		return
-	}
-
-	// if _, e = ioutil.ReadFile(path); e != nil {
-	// 	log.Println("ReadFile fails ", e.Error())
-	// }
-	//
-	ds = dataStore
-	return
-}
-
-func (ds *DataStore) Close() {
-	log.Println("xxxxxx")
-	path := filepath.Join(DataFileLocation, "ipmapper")
-
-	var writer bytes.Buffer
-	encoder := json.NewEncoder(&writer)
-	if err := encoder.Encode(ds.Data); err != nil {
-		log.Println(err.Error())
-		return
-	}
-
-	if err := ioutil.WriteFile(path, writer.Bytes(), 0644); err != nil {
-		log.Println(err.Error())
-	}
-
-	log.Println("wrote file to ", path)
-
 }
 
 func (d *Data) GetDevice(ip string) (device string, e error) {
@@ -116,14 +83,94 @@ func (d *Data) Update(u UpdateMessage) error {
 	return nil
 }
 
+type DataStore struct {
+	SignalChannel chan os.Signal
+	GetChannel    chan RequestResponse
+	PostChannel   chan RequestResponse
+}
+
+func NewDataStore(dataPath string) (ds Storable) {
+
+	datastore := &DataStore{
+		SignalChannel: make(chan os.Signal, 1),
+		GetChannel:    make(chan RequestResponse),
+		PostChannel:   make(chan RequestResponse),
+	}
+	ds = datastore
+
+	signal.Notify(datastore.SignalChannel, os.Interrupt)
+	go datastore.Updater()
+
+	return
+}
+
+func (ds *DataStore) UpdateDevice(msg *UpdateMessage) error {
+	request := NewPostRequestResponse(msg.IPAddress, msg.Device)
+	ds.PostChannel <- *request
+	response := <-request.ResponseChannel
+	return response.Err
+}
+
+func (ds *DataStore) GetDevice(ip string) (deviceName string, e error) {
+
+	request := NewGetRequestResponse(ip)
+	ds.GetChannel <- *request
+	response := <-request.ResponseChannel
+	return response.DeviceName, response.Err
+}
+
 func (ds *DataStore) Updater() {
+
+	data := NewData()
+
+	path := filepath.Join(DataFileLocation, "ipmapper.data")
+
+	if _, err := os.Stat(path); err != nil {
+		data.Update(UpdateMessage{IPAddress: "1.2.3.4", Device: "device1"})
+		data.Update(UpdateMessage{IPAddress: "1.2.3.5", Device: "device2"})
+		data.Update(UpdateMessage{IPAddress: "1.2.3.6", Device: "device3"})
+		data.Update(UpdateMessage{IPAddress: "1.2.128.1", Device: "device1"})
+		data.Update(UpdateMessage{IPAddress: "1.2.128.2", Device: "device2"})
+	} else {
+		var buffer []byte
+		if buffer, err = ioutil.ReadFile(path); err != nil {
+			return
+		}
+
+		reader := bytes.NewBuffer(buffer)
+		decoder := json.NewDecoder(reader)
+		if err = decoder.Decode(data); err != nil {
+			log.Println("Could not decode data file", err.Error())
+			return
+		}
+
+	}
 
 	for {
 		select {
 		case <-ds.SignalChannel:
-			ds.Close()
-			os.Exit(0)
+			var writer bytes.Buffer
+			encoder := json.NewEncoder(&writer)
+			if err := encoder.Encode(data); err != nil {
+				log.Println(err.Error())
+			}
 
+			if err := ioutil.WriteFile(path, writer.Bytes(), 0644); err != nil {
+				log.Println(err.Error())
+				os.Exit(1)
+			}
+
+			os.Exit(0)
+		case getRequest := <-ds.GetChannel:
+			getRequest.DeviceName, getRequest.Err = data.GetDevice(getRequest.IPAddress)
+			getRequest.ResponseChannel <- getRequest
+		case postRequest := <-ds.PostChannel:
+			u := UpdateMessage{
+				IPAddress: postRequest.IPAddress,
+				Device:    postRequest.DeviceName,
+			}
+			postRequest.Err = data.Update(u)
+			postRequest.ResponseChannel <- postRequest
 		}
 	}
 

@@ -1,4 +1,4 @@
-// +build !go1.5
+// +build !go1.5 testfile
 package main
 
 import "testing"
